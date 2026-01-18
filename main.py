@@ -4,18 +4,18 @@ import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 from textblob import TextBlob
-import os # Dosya kaydetmek için
+import os
 
 # Scikit-learn Libraries
-from sklearn.model_selection import train_test_split, StratifiedKFold, RandomizedSearchCV
+from sklearn.model_selection import train_test_split, RandomizedSearchCV, learning_curve
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.pipeline import FeatureUnion
 from sklearn.preprocessing import FunctionTransformer, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-# Imbalanced-learn (Template 4.2: Data Augmentation for Text)
+# Imbalanced-learn
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline 
 
@@ -28,28 +28,17 @@ sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (10, 6)
 plt.rcParams['font.size'] = 12
 
-# Rapor için görsellerin kaydedileceği klasörü oluştur
 if not os.path.exists('project_results'):
     os.makedirs('project_results')
 
 # ==========================================
-# 1. HELPER FUNCTIONS (Template 4.2: Pre-processing)
-# ==========================================
-# ==========================================
-# 1. HELPER FUNCTIONS (GÜNCELLENMİŞ HALİ)
+# 1. HELPER FUNCTIONS
 # ==========================================
 def clean_text(text):
     text = str(text).lower()
-    
-    # [DÜZELTME BURADA] '' yerine ' ' (boşluk) koyduk
-    # Böylece "it.I" -> "it I" olur, "iti" oluşmaz.
     text = re.sub(r'[^\w\s]', ' ', text)  
-    
     text = re.sub(r'\d+', '', text)
-    
-    # Fazladan oluşan boşlukları (  ) teke indirip temizleyelim
     text = re.sub(r'\s+', ' ', text).strip()
-    
     return text
 
 def get_sentiment(text):
@@ -62,14 +51,10 @@ def calculate_sentiment_scores(x):
     return x.apply(get_sentiment).values.reshape(-1, 1)
 
 def plot_feature_importance(model, feature_names, model_name):
-    """
-    Plots and SAVES the feature importance graph.
-    """
     importances = []
-    
-    if hasattr(model, 'coef_'): # Logistic Regression
+    if hasattr(model, 'coef_'): 
         importances = model.coef_[0]
-    elif hasattr(model, 'feature_importances_'): # Random Forest
+    elif hasattr(model, 'feature_importances_'): 
         importances = model.feature_importances_
     
     if len(importances) == len(feature_names):
@@ -80,47 +65,66 @@ def plot_feature_importance(model, feature_names, model_name):
         plt.figure(figsize=(12, 6))
         sns.barplot(x='Importance', y='Feature', data=df_top, palette='viridis')
         plt.title(f'Top 15 Most Important Features - {model_name}')
-        plt.xlabel('Importance Score')
-        plt.ylabel('Features')
         plt.tight_layout()
-        
-        # SAVE FIGURE (Template 6 Requirement)
         filename = f"project_results/feature_importance_{model_name.replace(' ', '_')}.png"
         plt.savefig(filename)
         print(f"[INFO] Feature Importance Plot saved to {filename}")
-        plt.show()
     else:
         print("Feature mismatch, skipping plot.")
 
+# --- YENİ EKLENEN LEARNING CURVE FONKSİYONU ---
+def plot_learning_curve_graph(estimator, X, y, model_name):
+    print(f"\n--- GENERATING LEARNING CURVE FOR {model_name} ---")
+    print("(This may take a moment as it retrains the model on different subset sizes...)")
+    
+    train_sizes, train_scores, test_scores = learning_curve(
+        estimator, X, y, cv=5, n_jobs=1, 
+        train_sizes=np.linspace(0.1, 1.0, 5), # Verinin %10, %32, %55, %77 ve %100'ü ile dener
+        scoring='accuracy'
+    )
+
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+    test_scores_std = np.std(test_scores, axis=1)
+
+    plt.figure(figsize=(10, 6))
+    plt.title(f"Learning Curve: {model_name}")
+    plt.xlabel("Training Examples (Data Size)")
+    plt.ylabel("Score (Accuracy)")
+    plt.grid(True)
+
+    # Train Curve
+    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.1, color="r")
+    plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Training Score")
+
+    # CV Curve
+    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.1, color="g")
+    plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Cross-Validation Score")
+
+    plt.legend(loc="best")
+    filename = "project_results/learning_curve.png"
+    plt.savefig(filename)
+    print(f"✅ Saved: {filename}")
+    # plt.show()
+
 # ==========================================
-# 2. DATA LOADING & DESCRIPTION (Template 4.1)
+# 2. DATA LOADING
 # ==========================================
-print("--- 1. DATASET DESCRIPTION (For Template Section 4.1) ---")
+print("--- 1. DATASET DESCRIPTION ---")
 try:
     df = pd.read_csv("fake reviews dataset.csv", encoding="utf-8")
     print(f"Total Number of Samples: {len(df)}")
-    
-    # Class Distribution (Rapora yazman gereken sayılar)
-    print("\nClass Distribution:")
-    dist = df['label'].value_counts()
-    print(dist)
-    
-    # Görselleştir ve Kaydet
-    plt.figure(figsize=(6, 4))
-    sns.countplot(x='label', data=df, palette='viridis')
-    plt.title('Class Distribution (Original)')
-    plt.savefig('project_results/class_distribution.png')
-    plt.show()
-    
 except FileNotFoundError:
     print("ERROR: 'fake reviews dataset.csv' not found.")
     exit()
 
 # ==========================================
-# 3. PRE-PROCESSING (Template 4.2)
+# 3. PRE-PROCESSING
 # ==========================================
-print("\n--- 2. PRE-PROCESSING (For Template Section 4.2) ---")
-print("Steps applied: Lowercasing, Regex Cleaning, Label Encoding.")
+print("\n--- 2. PRE-PROCESSING ---")
 df['text_cleaned'] = df['text_'].apply(clean_text)
 
 le = LabelEncoder()
@@ -129,23 +133,19 @@ classes = list(le.classes_)
 print(f"Classes Encoded: {classes}")
 
 # ==========================================
-# 4. DATA SPLITTING (Template 5.1)
+# 4. DATA SPLITTING
 # ==========================================
-print("\n--- 3. DATA SPLITTING (For Template Section 5.1) ---")
-print("Splitting Strategy: 80% Train, 20% Test (Stratified)")
+print("\n--- 3. DATA SPLITTING ---")
 X = df['text_cleaned'] 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y, shuffle=True
 )
 
 # ==========================================
-# 5. MODELING & COMPARISON (Template 5.2)
+# 5. MODELING & COMPARISON
 # ==========================================
 print("\n" + "="*50)
-print("--- 4. MACHINE LEARNING MODELS (For Template Section 5.2) ---")
-print("Comparison: Logistic Regression vs Random Forest")
-print("Validation: 5-Fold Cross Validation (Template Compliance)")
-print("Augmentation: SMOTE applied for text data balance")
+print("--- 4. MACHINE LEARNING MODELS ---")
 print("="*50)
 
 combined_features = FeatureUnion([
@@ -158,7 +158,7 @@ model_configs = [
         'name': 'Logistic Regression',
         'pipeline': ImbPipeline([
             ('features', combined_features),
-            ('smote', SMOTE(random_state=42)), # DATA AUGMENTATION
+            ('smote', SMOTE(random_state=42)),
             ('clf', LogisticRegression(max_iter=1000))
         ]),
         'params': {'clf__C': [0.1, 1, 10]}
@@ -167,66 +167,102 @@ model_configs = [
         'name': 'Random Forest',
         'pipeline': ImbPipeline([
             ('features', combined_features),
-            ('smote', SMOTE(random_state=42)), # DATA AUGMENTATION
+            ('smote', SMOTE(random_state=42)),
             ('clf', RandomForestClassifier(random_state=42, n_jobs=1))
         ]),
         'params': {'clf__n_estimators': [50, 100], 'clf__max_depth': [10, 20]}
+    },
+    {
+        'name': 'Gradient Boosting',
+        'pipeline': ImbPipeline([
+            ('features', combined_features),
+            ('smote', SMOTE(random_state=42)),
+            ('clf', GradientBoostingClassifier(random_state=42))
+        ]),
+        'params': {
+            'clf__n_estimators': [50, 100], 
+            'clf__learning_rate': [0.1, 0.2],
+            'clf__max_depth': [3, 5]
+        }
     }
 ]
 
 best_global_score = 0
 best_global_model = None
 best_global_name = ""
-results_summary = []
+results_summary = [] 
 
 for config in model_configs:
     print(f"\n⏳ TRAINING: {config['name']} with 5-Fold CV...")
     
-    # CV=5 YAPILDI (Template isteği)
     rs = RandomizedSearchCV(
         config['pipeline'], param_distributions=config['params'],
         n_iter=3, cv=5, scoring='f1_macro', n_jobs=1, random_state=42, verbose=1
     )
     rs.fit(X_train, y_train)
     
-    # Evaluation (Template 6)
-    y_pred = rs.best_estimator_.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
+    y_train_pred = rs.best_estimator_.predict(X_train)
+    train_acc = accuracy_score(y_train, y_train_pred)
     
-    print(f"✅ {config['name']} Accuracy: {acc:.4f}")
+    y_pred = rs.best_estimator_.predict(X_test)
+    test_acc = accuracy_score(y_test, y_pred)
+    
+    print(f"📊 {config['name']} Performance Analysis:")
+    print(f"   Train Accuracy: {train_acc:.4f}")
+    print(f"   Test Accuracy:  {test_acc:.4f}")
+    
+    diff = train_acc - test_acc
+    if diff > 0.10: 
+        print(f"   ⚠️ WARNING: High Overfitting Risk! (Gap: {diff:.2f})")
+    else:
+        print(f"   ✅ Model seems Balanced (Gap: {diff:.2f})")
+
     print(classification_report(y_test, y_pred, target_names=classes))
     
-    # Confusion Matrix Plot & Save
+    # Confusion Matrix Save
     cm = confusion_matrix(y_test, y_pred)
     plt.figure(figsize=(6, 4))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
     plt.title(f'Confusion Matrix - {config["name"]}')
     plt.savefig(f'project_results/confusion_matrix_{config["name"].replace(" ", "_")}.png')
-    plt.show()
+    plt.close() 
     
-    results_summary.append({'Model': config['name'], 'Accuracy': acc})
+    results_summary.append({
+        'Model': config['name'], 
+        'Train Accuracy': train_acc,
+        'Test Accuracy': test_acc
+    })
     
-    if acc > best_global_score:
-        best_global_score = acc
+    if test_acc > best_global_score:
+        best_global_score = test_acc
         best_global_model = rs.best_estimator_
         best_global_name = config['name']
 
 # ==========================================
-# 6. FINAL RESULTS SUMMARY (Template 6)
+# 6. FINAL RESULTS & PLOTS
 # ==========================================
 print("\n" + "*"*40)
 print(f"🏆 WINNER MODEL: {best_global_name} (Score: {best_global_score:.4f})")
 print("*"*40)
 
-# Accuracy Comparison Plot & Save
-plt.figure(figsize=(8, 5))
-sns.barplot(x='Model', y='Accuracy', data=pd.DataFrame(results_summary), palette='viridis')
-plt.title('Model Comparison Results')
-plt.ylim(0.5, 1.0)
-plt.savefig('project_results/model_comparison.png')
-plt.show()
+# 1. Overfitting Bar Plot
+df_res = pd.DataFrame(results_summary)
+df_melted = df_res.melt(id_vars="Model", var_name="Dataset", value_name="Accuracy")
+plt.figure(figsize=(10, 6))
+sns.barplot(x='Model', y='Accuracy', hue='Dataset', data=df_melted, palette='muted')
+plt.title('Train vs Test Accuracy (Overfitting Check)')
+plt.ylim(0.5, 1.05)
+plt.savefig('project_results/overfitting_analysis.png')
+print("✅ Saved: project_results/overfitting_analysis.png")
 
-# Feature Importance Plot & Save
+# 2. Learning Curve (Sadece Kazanan Model İçin)
+# Bu işlem biraz uzun sürebilir çünkü modeli 5-6 kere tekrar eğitir
+try:
+    plot_learning_curve_graph(best_global_model, X_train, y_train, best_global_name)
+except Exception as e:
+    print(f"Could not plot learning curve: {e}")
+
+# 3. Feature Importance
 print(f"\n--- GENERATING FEATURE IMPORTANCE FOR REPORT ({best_global_name}) ---")
 try:
     step_clf = best_global_model.named_steps['clf']
@@ -237,7 +273,6 @@ try:
     feature_names.append("Sentiment_Score")
     
     plot_feature_importance(step_clf, feature_names, best_global_name)
-
 except Exception as e:
     print(f"Could not plot features: {e}")
 
@@ -255,7 +290,12 @@ while True:
     input_series = pd.Series([clean_text(user_input)])
     prediction_idx = best_global_model.predict(input_series)[0]
     raw_label = le.inverse_transform([prediction_idx])[0]
-    proba = best_global_model.predict_proba(input_series).max()
+    
+    try:
+        proba = best_global_model.predict_proba(input_series).max()
+        conf_str = f"(Confidence: {proba*100:.2f}%)"
+    except:
+        conf_str = ""
     
     label = "FAKE (Computer Generated)" if raw_label == 'CG' else "REAL (Original)"
-    print(f"Prediction: {label} (Confidence: {proba*100:.2f}%)")
+    print(f"Prediction: {label} {conf_str}")
