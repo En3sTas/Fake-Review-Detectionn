@@ -1,0 +1,128 @@
+# Fake Review Detection
+
+A machine learning project for classifying English product reviews as computer-generated (`CG`) or original (`OR`). The training script cleans review text, combines TF-IDF features with TextBlob sentiment polarity, compares three classifiers, saves evaluation plots, and then opens an interactive prompt for testing new reviews.
+
+The repository includes the dataset used by the script and previously generated plots. It does not include a packaged model or an inference-only service.
+
+## Features
+
+- Cleans text by lowercasing it and removing punctuation, digits, and repeated whitespace.
+- Encodes the `CG` and `OR` labels with `LabelEncoder`.
+- Uses a stratified 80/20 train/test split with `random_state=42`.
+- Combines up to 3,000 English TF-IDF features with one sentiment-polarity feature.
+- Applies SMOTE inside each imbalanced-learn training pipeline.
+- Tunes Logistic Regression, Random Forest, and Gradient Boosting with randomized search and 5-fold cross-validation.
+- Selects hyperparameters using macro F1, then compares models using held-out test accuracy.
+- Prints classification reports and offers an interactive prediction loop after training.
+- Produces confusion matrices, an overfitting comparison, a learning curve, and feature-importance visualization where supported.
+
+## Project structure
+
+```text
+.
+├── fake reviews dataset.csv   # Training data used directly by main.py
+├── main.py                    # Training, evaluation, plotting, and interactive prediction
+└── project_results/           # Generated and retained evaluation images
+```
+
+The CSV contains 40,432 rows with four columns:
+
+| Column | Use in the current script |
+| --- | --- |
+| `category` | Present in the dataset; not used as a model feature |
+| `rating` | Present in the dataset; not used as a model feature |
+| `label` | Classification target (`CG` or `OR`) |
+| `text_` | Review text used to build the model features |
+
+The checked-in dataset is balanced: 20,216 rows have each label.
+
+## Setup
+
+The project does not currently provide a pinned dependency or Python-version file. The source has been syntax-checked with Python 3.12.3.
+
+From the repository root, create an isolated environment and install the imported packages:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install pandas numpy matplotlib seaborn textblob scikit-learn imbalanced-learn
+```
+
+On Windows PowerShell, activate the environment with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+### Dependencies
+
+- `pandas` and `numpy` for data handling
+- `scikit-learn` for feature extraction, model selection, models, and metrics
+- `imbalanced-learn` for SMOTE and its pipeline implementation
+- `textblob` for sentiment polarity
+- `matplotlib` and `seaborn` for visualizations
+
+No additional TextBlob corpus download is used by the current sentiment function.
+
+## Training and running
+
+Keep `main.py` and `fake reviews dataset.csv` in the repository root, then run:
+
+```bash
+python main.py
+```
+
+The script performs the complete workflow on every run:
+
+1. Loads and cleans the dataset.
+2. Creates the stratified train/test split.
+3. Runs three randomized hyperparameter searches with 5-fold cross-validation.
+4. Evaluates each best estimator on the training and test sets.
+5. Selects the model with the highest held-out test accuracy.
+6. Regenerates evaluation images.
+7. Enters interactive test mode.
+
+Training includes repeated cross-validation and a learning-curve calculation, so execution may take some time. The script currently uses one worker (`n_jobs=1`) for its searches and learning curve.
+
+When the prompt appears, enter a review or `q` to exit:
+
+```text
+Enter a review (or 'q' to quit): The item arrived on time and works as expected.
+Enter a review (or 'q' to quit): q
+```
+
+The prediction is displayed as `FAKE (Computer Generated)` or `REAL (Original)`. If the selected classifier exposes `predict_proba`, the script also prints its highest predicted probability as “Confidence.”
+
+## Generated outputs
+
+The current version of `main.py` writes or overwrites these files in `project_results/`:
+
+```text
+confusion_matrix_Logistic_Regression.png
+confusion_matrix_Random_Forest.png
+confusion_matrix_Gradient_Boosting.png
+overfitting_analysis.png
+learning_curve.png
+feature_importance_<winning model>.png
+```
+
+Feature importance is generated only when the winning estimator exposes coefficients or feature importances matching the constructed feature list. Errors during learning-curve or feature-importance generation are printed and do not stop interactive mode.
+
+The directory also contains `class_distribution.png`, `model_comparison.png`, `confusion_matrix_Support_Vector_Machine.png`, `SMOTE.png`, and `Validation.png`. These are retained artifacts from earlier repository versions and are not regenerated by the current script. Treat all checked-in plots as snapshots: rerun the current code before using them to describe a new experiment.
+
+## Current limitations
+
+- The script trains from scratch before every prediction session and does not persist the fitted model or label encoder.
+- There is no command-line configuration, API, notebook, automated test suite, or inference-only entry point.
+- Dependency versions are not pinned, so results and compatibility may vary between environments.
+- Only review text and derived sentiment are modeled; the available category and rating fields are ignored.
+- Evaluation uses a single fixed held-out split from the bundled dataset. There is no external validation dataset.
+- The value printed as “Confidence” is the maximum class probability, not a separately calibrated confidence score.
+- Broad warning suppression and exception handling can hide useful diagnostics.
+- Randomized-search model selection is based on macro F1, while the final winner is chosen by test accuracy. Using the test set to select the winner can make that reported comparison optimistic.
+- The interactive input is intended for English text because TF-IDF uses English stop words and the sentiment feature comes from TextBlob.
+
+## Usage notes
+
+Use the interactive mode for exploratory examples rather than production decisions. For reproducible comparisons, keep the dataset unchanged, record the installed package versions, and preserve the console output together with the regenerated plots. Do not infer current model quality from filenames alone; the script prints the scores produced by each run.
